@@ -1,4 +1,5 @@
 from datetime import datetime
+from pprint import pprint
 from time import gmtime, mktime
 
 import finnhub
@@ -22,6 +23,8 @@ class Chart:
 
         self.uptrend = []
         self.downtrend = []
+
+        self.vertices = []
 
         self.data = self._process(self.symbol)
 
@@ -169,8 +172,14 @@ class Chart:
         for i in range(len(trend_list) - 1):
             if trend_list[i][1] > trend_list[i + 1][1]:
                 downtrend.append(dict([trend_list[i], trend_list[i + 1]]))
+                self.vertices.append(trend_list[i])
+                self.vertices.append(trend_list[i + 1])
             else:
                 uptrend.append(dict([trend_list[i], trend_list[i + 1]]))
+                self.vertices.append(trend_list[i])
+                self.vertices.append(trend_list[i + 1])
+
+        self.vertices = [*set(self.vertices)]
 
         self.uptrend = uptrend
         self.downtrend = downtrend
@@ -203,6 +212,65 @@ class Chart:
 
             if d.get("trend") is None:
                 d["trend"] = "undefined"
+
+    def _calc_fib_retr(self) -> list:
+        def getFibRET(start, end):
+            start_price = start[1]
+            end_price = end[1]
+
+            diff = start_price - end_price
+            return {
+                "start": start,
+                "end": end,
+                "fib": {
+                    "-1.618": end_price + (diff * -1.618),
+                    "-1.382": end_price + (diff * -1.382),
+                    "-1.236": end_price + (diff * -1.236),
+                    "-0.886": end_price + (diff * -0.886),
+                    "-0.786": end_price + (diff * -0.786),
+                    "-0.618": end_price + (diff * -0.618),
+                    "-0.5": end_price + (diff * -0.5),
+                    "-0.382": end_price + (diff * -0.382),
+                    "-0.236": end_price + (diff * -0.236),
+                    # "0": l,
+                    "0.236": end_price + (diff * 0.236),
+                    "0.382": end_price + (diff * 0.382),
+                    "0.5": end_price + (diff * 0.5),
+                    "0.618": end_price + (diff * 0.618),
+                    "0.786": end_price + (diff * 0.786),
+                    "0.886": end_price + (diff * 0.886),
+                    "1.236": end_price + (diff * 1.236),
+                    "1.382": end_price + (diff * 1.382),
+                    "1.618": end_price + (diff * 1.618),
+                },
+            }
+
+        ret = []
+        for i in range(len(self.vertices)):
+            for j in range(len(self.vertices)):
+                if j <= i:
+                    continue
+                if (
+                    abs(self.vertices[i][1] - self.vertices[j][1])
+                    / max([self.vertices[i][1], self.vertices[j][1]])
+                ) > 0.3:
+                    ret.append(getFibRET(self.vertices[i], self.vertices[j]))
+        return ret
+
+    def _count_overlapping(self, fib_list: list):
+        def is_overlapped(p1: float, p2: float) -> bool:
+            return (abs(p1 - p2) / max([p1, p2])) < 0.003
+
+        for fib_dict in fib_list:
+            fib = fib_dict["fib"]
+            fib_values = list(fib.values())
+            count = 0
+            for vertex in self.vertices:
+                for fib_value in fib_values:
+                    if is_overlapped(fib_value, vertex[1]):
+                        count += 1
+
+            fib_dict["overlap_cnt"] = count
 
     def _process(self, symbol: str) -> list:
         data = self.f.technical_indicator(
@@ -263,6 +331,17 @@ class Chart:
             return fig
         else:
             self.set_trend(window=window)
+            a = self._calc_fib_retr()
+            self._count_overlapping(a)
+            if a:
+                max_a = max(a, key=lambda x: x["overlap_cnt"])
+                for k, v in list(max_a["fib"].items()):
+                    fig.add_hline(
+                        y=v,
+                        annotation_text=f"{k} ({v})",
+                        annotation_position="right",
+                        # color="green",
+                    )
             for uptrend in self.uptrend:
                 fig.add_trace(
                     go.Scatter(
