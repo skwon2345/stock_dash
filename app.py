@@ -124,6 +124,7 @@ def my_func(symbol, start_date, end_date, trend):
     resolution = "D"
 
     cmp = Chart(symbol, resolution, start_date, end_date)
+    cmp.set_trend(20)
 
     chart = cmp.get_chart(trend=trend, window=20)
 
