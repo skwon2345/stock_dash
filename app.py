@@ -72,8 +72,8 @@ app.layout = html.Div(
                             display_format="Y-M-D",
                             min_date_allowed=date(2000, 1, 1),
                             max_date_allowed=date.today(),
-                            initial_visible_month=date(2023, 1, 1),
-                            start_date=date(2023, 1, 1),
+                            initial_visible_month=date(2020, 1, 1),
+                            start_date=date(2020, 1, 1),
                             end_date=date.today(),
                         ),
                         daq.BooleanSwitch(
@@ -122,11 +122,11 @@ def my_func(symbol, start_date, end_date, trend):
 
     # print("gege")
     resolution = "D"
-
+    # 27.56
     cmp = Chart(symbol, resolution, start_date, end_date)
     # cmp.set_trend(40)
 
-    chart = cmp.get_chart(trend=trend, window=30)
+    chart = cmp.get_chart(trend=trend, window=20)
 
     return chart
 

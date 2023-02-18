@@ -78,18 +78,21 @@ class Chart:
             cur_low = low_list[low_i]
             if cur_high[0] < cur_low[0]:
                 if trend == "":
+                    cur_high = (cur_high[0], cur_high[1])
                     ret.append(cur_high)
                 else:
                     if trend == "downtrend":
                         if ret[-1][1] < cur_high[1]:
                             ret[-1] = cur_high
                     else:
+                        # cur_high = (cur_high[0], cur_high[1])
                         ret.append(cur_high)
                 trend = "downtrend"
                 high_i += 1
 
             elif cur_low[0] < cur_high[0]:
                 if trend == "":
+                    cur_low = (cur_low[0], cur_low[1])
                     ret.append(cur_low)
                 else:
                     if trend == "uptrend":
@@ -168,24 +171,34 @@ class Chart:
     def _set_trend_list(self, trend_list: list) -> None:
         uptrend = []
         downtrend = []
+        test_list = []
 
         for i in range(len(trend_list) - 1):
             if trend_list[i][1] > trend_list[i + 1][1]:
                 downtrend.append(dict([trend_list[i], trend_list[i + 1]]))
-                self.vertices.append(trend_list[i])
-                self.vertices.append(trend_list[i + 1])
+                if i == 0:
+                    self.vertices.append(
+                        (trend_list[i][0], trend_list[i][1], "uptrend")
+                    )
+                self.vertices.append(
+                    (trend_list[i + 1][0], trend_list[i + 1][1], "downtrend")
+                )
             else:
                 uptrend.append(dict([trend_list[i], trend_list[i + 1]]))
-                self.vertices.append(trend_list[i])
-                self.vertices.append(trend_list[i + 1])
-
-        self.vertices = [*set(self.vertices)]
+                if i == 0:
+                    self.vertices.append(
+                        (trend_list[i][0], trend_list[i][1], "downtrend")
+                    )
+                self.vertices.append(
+                    (trend_list[i + 1][0], trend_list[i + 1][1], "uptrend")
+                )
 
         self.uptrend = uptrend
         self.downtrend = downtrend
 
     def set_trend(self, window: int) -> None:
         trend_list = self._get_trend_list(self.data, window)
+
         self._set_trend_list(trend_list)
 
         for d in self.data:
@@ -213,7 +226,7 @@ class Chart:
             if d.get("trend") is None:
                 d["trend"] = "undefined"
 
-    def _calc_fib_retr(self) -> list:
+    def _calc_fib_retr(self, minimum_diff_ratio: float) -> list:
         def getFibRET(start, end):
             start_price = start[1]
             end_price = end[1]
@@ -232,7 +245,6 @@ class Chart:
                     "-0.5": end_price + (diff * -0.5),
                     "-0.382": end_price + (diff * -0.382),
                     "-0.236": end_price + (diff * -0.236),
-                    # "0": l,
                     "0.236": end_price + (diff * 0.236),
                     "0.382": end_price + (diff * 0.382),
                     "0.5": end_price + (diff * 0.5),
@@ -250,27 +262,47 @@ class Chart:
             for j in range(len(self.vertices)):
                 if j <= i:
                     continue
+                vertex_one = self.vertices[i]
+                vertex_two = self.vertices[j]
+
                 if (
-                    abs(self.vertices[i][1] - self.vertices[j][1])
-                    / max([self.vertices[i][1], self.vertices[j][1]])
-                ) > 0.3:
-                    ret.append(getFibRET(self.vertices[i], self.vertices[j]))
+                    vertex_one[2] != vertex_two[2]
+                    and (
+                        abs(vertex_one[1] - vertex_two[1])
+                        / max([vertex_one[1], vertex_two[1]])
+                    )
+                    > minimum_diff_ratio
+                ):
+                    if (
+                        vertex_one[2] == "uptrend"
+                        and (vertex_one[1] > vertex_two[1])
+                    ) or (
+                        vertex_one[2] == "downtrend"
+                        and (vertex_one[1] < vertex_two[1])
+                    ):
+                        ret.append(getFibRET(vertex_one, vertex_two))
+
         return ret
 
-    def _count_overlapping(self, fib_list: list):
+    def _count_overlapping(
+        self, fib_list: list, overlap_ratio: float, show_overlap_only: bool
+    ):
         def is_overlapped(p1: float, p2: float) -> bool:
-            return (abs(p1 - p2) / max([p1, p2])) < 0.003
+            return (abs(p1 - p2) / max([p1, p2])) < overlap_ratio
 
         for fib_dict in fib_list:
             fib = fib_dict["fib"]
-            fib_values = list(fib.values())
             count = 0
+            new_fib = {}
             for vertex in self.vertices:
-                for fib_value in fib_values:
-                    if is_overlapped(fib_value, vertex[1]):
+                for k, v in fib.items():
+                    if is_overlapped(v, vertex[1]):
+                        new_fib[k] = v
                         count += 1
 
             fib_dict["overlap_cnt"] = count
+            if show_overlap_only:
+                fib_dict["fib"] = new_fib
 
     def _process(self, symbol: str) -> list:
         data = self.f.technical_indicator(
@@ -331,17 +363,37 @@ class Chart:
             return fig
         else:
             self.set_trend(window=window)
-            a = self._calc_fib_retr()
-            self._count_overlapping(a)
+            a = self._calc_fib_retr(minimum_diff_ratio=0.3)
+            self._count_overlapping(
+                fib_list=a, overlap_ratio=0.003, show_overlap_only=True
+            )
             if a:
                 max_a = max(a, key=lambda x: x["overlap_cnt"])
+                color = "Green"  # 강세장의 경우, 저점 -> 고점 (다음 지지 확인)
+                if (
+                    max_a["start"][1] > max_a["end"][1]
+                ):  # 약세장의 경우, 고점 -> 저점 (다음 저항 확인)
+                    color = "Red"
                 for k, v in list(max_a["fib"].items()):
                     fig.add_hline(
                         y=v,
                         annotation_text=f"{k} ({v})",
                         annotation_position="right",
-                        # color="green",
+                        line_color=color,
                     )
+                fig.add_trace(
+                    go.Scatter(
+                        x=[max_a["start"][0], max_a["end"][0]],
+                        y=[max_a["start"][1], max_a["end"][1]],
+                        mode="lines+markers+text",
+                        name="Lines and Text",
+                        text=[max_a["start"][2], max_a["end"][2]],
+                        textposition="bottom center",
+                        textfont=dict(
+                            family="sans serif", size=18, color="LightSeaGreen"
+                        ),
+                    )
+                )
             for uptrend in self.uptrend:
                 fig.add_trace(
                     go.Scatter(
